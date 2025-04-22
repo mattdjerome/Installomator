@@ -50,28 +50,13 @@ reloadAsUser() {
 displaydialog() { # $1: message $2: title
     message=${1:-"Message"}
     title=${2:-"Installomator"}
-#     if [[ "$NOTIFIER_APP" = "dialog" ]]; then
-#         printlog "Swift Dialog dialog override" INFO
-#         "$DIALOG_CMD" --title "$title" --message "$message" --ontop --button2text "Not Now" --button1text "Quit and Update" --icon "$installedAppPath" --overlayicon "/Library/Application Support/Dialog/Dialog.app" --mini --moveable # "$LOGO"
-#         if [[ $? -eq 2 ]]; then
-#             echo "Not Now" # Clicked button
-#         fi
-#     else
-#         printlog "AppleScript dialog fallback" INFO
     runAsUser osascript -e "button returned of (display dialog \"$message\" with  title \"$title\" buttons {\"Not Now\", \"Quit and Update\"} default button \"Quit and Update\" with icon POSIX file \"$LOGO\" giving up after $PROMPT_TIMEOUT)"
-#     fi
 }
 
 displaydialogContinue() { # $1: message $2: title
     message=${1:-"Message"}
     title=${2:-"Installomator"}
-#     if [[ "$NOTIFIER_APP" = "dialog" ]]; then
-#         printlog "Swift Dialog dialog override" INFO
-#         "$DIALOG_CMD" --title "$title" --message "$message" --ontop --button1text "Quit and Update" --button2disabled --icon "$installedAppPath" --overlayicon "/Library/Application Support/Dialog/Dialog.app" --mini --moveable # "$LOGO"
-#     else
-#         printlog "AppleScript dialog fallback" INFO
     runAsUser osascript -e "button returned of (display dialog \"$message\" with  title \"$title\" buttons {\"Quit and Update\"} default button \"Quit and Update\" with icon POSIX file \"$LOGO\")"
-#     fi
 }
 
 displaynotification() { # $1: message $2: title
@@ -137,7 +122,8 @@ printlog(){
         echo "$timestamp" : "${log_priority}${space_char} : $label : Last Log repeated ${logrepeat} times" | tee -a $log_location
 
         if [[ ! -z $datadogAPI ]]; then
-            curl -s -X POST https://http-intake.logs.datadoghq.com/v1/input -H "Content-Type: text/plain" -H "DD-API-KEY: $datadogAPI" -d "${log_priority} : $mdmURL : $APPLICATION : $VERSION : $SESSION : Last Log repeated ${logrepeat} times" > /dev/null
+          datadogLogEntry=$(eval "echo $DATADOG_REPEAT_LOGFORMAT")
+          curl -s -X POST https://http-intake.logs.datadoghq.com/v1/input -H "Content-Type: text/plain" -H "DD-API-KEY: $datadogAPI" -d "${datadogLogEntry}" > /dev/null
         fi
         logrepeat=0
     fi
@@ -146,7 +132,8 @@ printlog(){
     # then post to Datadog's HTTPs endpoint.
     if [[ -n $datadogAPI && ${levels[$log_priority]} -ge ${levels[$datadogLoggingLevel]} ]]; then
         while IFS= read -r logmessage; do
-            curl -s -X POST https://http-intake.logs.datadoghq.com/v1/input -H "Content-Type: text/plain" -H "DD-API-KEY: $datadogAPI" -d "${log_priority} : $mdmURL : Installomator-${label} : ${VERSIONDATE//-/} : $SESSION : ${logmessage}" > /dev/null
+          datadogLogEntry=$(eval "echo $DATADOG_LOGFORMAT")
+          curl -s -X POST https://http-intake.logs.datadoghq.com/v1/input -H "Content-Type: text/plain" -H "DD-API-KEY: $datadogAPI" -d "${datadogLogEntry}" > /dev/null
         done <<< "$log_message"
     fi
 
@@ -241,11 +228,11 @@ versionFromGit() {
 xpath() {
 	# the xpath tool changes in Big Sur and now requires the `-e` option
 	if [[ $(sw_vers -buildVersion) > "20A" ]]; then
-		/usr/bin/xpath -e $@
+		/usr/bin/xpath -q -e $@
 		# alternative: switch to xmllint (which is not perl)
 		#xmllint --xpath $@ -
 	else
-		/usr/bin/xpath $@
+		/usr/bin/xpath -q $@
 	fi
 }
 
@@ -296,11 +283,11 @@ getAppVersion() {
 #            targetDir="/Applications/Utilities"
 #        fi
     else
-    #    applist=$(mdfind "kind:application $appName" -0 )
         printlog "name: $name, appName: $appName"
-        applist=$(mdfind "kind:application AND name:$name" -0 )
+        # mdfind now handling if kind is either Application or App
+        applist=$(mdfind "kMDItemContentType:com.apple.application AND kMDItemFSName:\"$name\"" -0 2>/dev/null)
+#        applist=$(mdfind "kMDItemContentType:com.apple.application AND kMDItemFSName:\"$appName\"" -0 2>/dev/null)
 #        printlog "App(s) found: ${applist}" DEBUG
-#        applist=$(mdfind "kind:application AND name:$appName" -0 )
     fi
     if [[ -z $applist ]]; then
         printlog "No previous app found" WARN
@@ -600,7 +587,7 @@ installAppWithPath() { # $1: path to app to install in $targetDir $2: path to fo
         fi
 
         # set ownership to current user
-        if [[ "$currentUser" != "loginwindow" && $SYSTEMOWNER -ne 1 ]]; then
+        if [[ "$currentUser" != "loginwindow" && "$currentUser" != "_mbsetupuser" && $SYSTEMOWNER -ne 1 ]]; then
             printlog "Changing owner to $currentUser" WARN
             chown -R "$currentUser" "$targetDir/$appName"
         else
@@ -662,9 +649,9 @@ installFromPKG() {
     spctlStatus=$(echo $?)
     printlog "spctlOut is $spctlOut" DEBUG
 
-    teamID=$(echo $spctlOut | awk -F '(' '/origin=/ {print $2 }' | tr -d '()' )
-    # Apple signed software has no teamID, grab entire origin instead
-    if [[ -z $teamID ]]; then
+    teamID=$(echo $spctlOut | awk -F '(' '/origin=/ {print $NF }' | tr -d '()' )
+    # Apple signed software has no teamID, grab entire text after origin= instead
+    if [[ -z $teamID ]] || [[ $teamID == "origin="* ]]; then
         teamID=$(echo $spctlOut | awk -F '=' '/origin=/ {print $NF }')
     fi
 

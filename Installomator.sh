@@ -8643,8 +8643,12 @@ obsbotcenter|\
 obsbotwebcam)
     name="OBSBOT_Center"
     type="dmg"
-    downloadURL=$(curl -fsL "https://www.obsbot.com/download/obsbot-tiny-series" | xmllint --html --xpath 'string(//a[contains(@href,"Obsbot_Center_OA_E_MacOS")]/@href)' - 2> /dev/null)
-    appNewVersion=$(curl -fsL "https://www.obsbot.com/download/obsbot-tiny-series" | xmllint --html --xpath 'substring-after(substring-before(string(//a[contains(@href,"Obsbot_Center_OA_E_MacOS")]/@href),"_release"),"MacOS_")' - 2> /dev/null)
+    if [[ $(arch) == arm64 ]]; then
+      downloadURL=$(curl -fsL "https://www.obsbot.com/download/obsbot-tiny-series" | grep -oE 'https:\\u002F\\u002F[^"]*Center_OA_E_MacOS_Apple[^"]*_release\.dmg' | sed 's/\\u002F/\//g' | head -1)
+    elif [[ $(arch) == i386 ]]; then
+      downloadURL=$(curl -fsL "https://www.obsbot.com/download/obsbot-tiny-series" | grep -oE 'https:\\u002F\\u002F[^"]*Center_OA_E_MacOS_Intel[^"]*_release\.dmg' | sed 's/\\u002F/\//g' | head -1)
+    fi
+    appNewVersion=$(echo "$downloadURL" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
     expectedTeamID="7GJANK3822"
     ;;
 obsidian)
